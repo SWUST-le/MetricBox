@@ -14,10 +14,11 @@ from .models import ScriptEntry
 class ImageJob:
     entry: ScriptEntry
     output: Path
+    xlsx_output: Path | None = None
 
 
 def prepare_image_job(kind, original, processed, output, threshold, data_range,
-                      result_dir, template=None):
+                      result_dir, template=None, output_format="json"):
     if kind not in ("quality", "segmentation", "fusion"):
         raise ValueError("请选择支持的图像指标")
 
@@ -40,16 +41,24 @@ def prepare_image_job(kind, original, processed, output, threshold, data_range,
         destination = Path(output.strip()).expanduser()
         if not destination.is_absolute():
             raise ValueError("结果文件请填写绝对路径，或使用选择按钮")
-        if destination.suffix.lower() != ".json":
-            raise ValueError("结果文件须使用 .json 扩展名")
+        if destination.suffix.lower() not in (".json", ".xlsx"):
+            raise ValueError("结果文件须使用 .json 或 .xlsx 扩展名")
+        output_format = destination.suffix.lower()[1:]
         destination = destination.resolve()
     else:
-        name = f"{kind}_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}.json"
+        if output_format not in ("json", "xlsx"):
+            raise ValueError("请选择 JSON 或 Excel 输出格式")
+        name = f"{kind}_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}.{output_format}"
         destination = Path(result_dir).resolve() / name
     if destination in (prediction, reference) or destination.is_dir():
         raise ValueError("结果文件不能覆盖输入文件或目录")
     if destination.exists():
         raise ValueError("结果文件已存在，请选择新文件名，避免覆盖历史结果")
+    xlsx_output = destination if output_format == "xlsx" else None
+    if xlsx_output:
+        destination = destination.with_suffix(".json")
+        if destination.exists() or destination in (prediction, reference):
+            raise ValueError("配套 JSON 文件已存在或与输入重复，请选择新文件名")
     arguments = ["--image", str(prediction)] if kind == "fusion" else [
         "--pred", str(prediction), "--target", str(reference)]
     if kind in ("quality", "segmentation"):
@@ -62,5 +71,7 @@ def prepare_image_job(kind, original, processed, output, threshold, data_range,
             raise ValueError(f"{label}须为有限数值，且动态范围须大于零")
         arguments += ["--data-range" if kind == "quality" else "--threshold", str(number)]
     arguments += ["--output", str(destination)]
+    if xlsx_output:
+        arguments += ["--xlsx", str(xlsx_output)]
     default = next(entry for entry in builtin_entries() if Path(entry.path).stem == kind)
-    return ImageJob(replace(template or default, arguments=arguments), destination)
+    return ImageJob(replace(template or default, arguments=arguments), destination, xlsx_output)

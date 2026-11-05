@@ -1,6 +1,7 @@
 """Scrollable image input form, independent of persistence and execution."""
 
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, ttk
 
 from .theme import PANEL, MUTED
@@ -17,6 +18,7 @@ class ImageInputPanel(ttk.Frame):
         self.original = tk.StringVar()
         self.processed = tk.StringVar()
         self.output = tk.StringVar()
+        self.output_format = tk.StringVar(value="xlsx")
         self.threshold = tk.StringVar(value="127")
         self.data_range = tk.StringVar(value="255")
         self.hint = tk.StringVar()
@@ -50,6 +52,11 @@ class ImageInputPanel(ttk.Frame):
         ttk.Label(options, text="掩膜阈值", style="Panel.TLabel").pack(side="left")
         self.threshold_input = ttk.Entry(options, textvariable=self.threshold, width=8)
         self.threshold_input.pack(side="left", padx=8)
+        ttk.Label(options, text="输出格式", style="Panel.TLabel").pack(side="left", padx=(12, 0))
+        format_box = ttk.Combobox(options, textvariable=self.output_format, values=["xlsx", "json"], width=7, state="readonly")
+        format_box.pack(side="left", padx=8)
+        format_box.bind("<<ComboboxSelected>>", self.change_output_format)
+        self.output.trace_add("write", lambda *args: self.sync_output_format())
         hint = ttk.Label(form, textvariable=self.hint, background=PANEL, foreground=MUTED, wraplength=650)
         hint.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(2, 0))
         canvas.bind("<Configure>", lambda event: (canvas.itemconfigure(window, width=event.width),
@@ -84,10 +91,22 @@ class ImageInputPanel(ttk.Frame):
             variable.set(path)
 
     def browse_output(self):
-        path = filedialog.asksaveasfilename(parent=self, title="选择 JSON 结果路径", defaultextension=".json",
-                                            filetypes=[("JSON 结果", "*.json")])
+        types = [("Excel 工作簿", "*.xlsx"), ("JSON 结果", "*.json")]
+        if self.output_format.get() == "json":
+            types.reverse()
+        path = filedialog.asksaveasfilename(parent=self, title="选择结果文件路径", defaultextension="." + self.output_format.get(),
+                                            filetypes=types)
         if path:
             self.output.set(path)
+
+    def sync_output_format(self):
+        suffix = Path(self.output.get()).suffix.lower()
+        if suffix in (".xlsx", ".json"):
+            self.output_format.set(suffix[1:])
+
+    def change_output_format(self, event=None):
+        if self.output.get().strip():
+            self.output.set(str(Path(self.output.get()).with_suffix("." + self.output_format.get())))
 
     def update_task(self):
         kind = self.kind

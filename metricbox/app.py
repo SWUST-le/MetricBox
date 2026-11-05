@@ -33,6 +33,7 @@ class MetricBoxApp:
         self._terminal_event = None
         self._poll_id = None
         self._image_output = None
+        self._image_xlsx = None
         root.title("MetricBox · 深度学习指标工具箱")
         root.geometry("1240x850")
         root.minsize(1000, 720)
@@ -167,7 +168,7 @@ class MetricBoxApp:
         result_frame = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.tabs.add(result_frame, text="计算结果")
         self.image_results = self._text_area(result_frame, "white", theme.TEXT)
-        self.set_text(self.image_results, "选择原始图像和处理后图像，点击“开始计算”。结果将自动保存为 JSON 文件。")
+        self.set_text(self.image_results, "选择原始图像和处理后图像，点击“开始计算”。默认保存 Excel 和配套 JSON，也可选择仅 JSON。")
         self.status_var = tk.StringVar(value=f"就绪  ·  脚本库：{self.store.path}")
         ttk.Label(main, textvariable=self.status_var, style="Muted.TLabel", wraplength=900).grid(
             row=5, column=0, sticky="w", pady=(14, 0))
@@ -343,20 +344,22 @@ class MetricBoxApp:
         template = next((item for item in self.store.entries if Path(item.path).resolve() == Path(default.path).resolve()), default)
         try:
             job = prepare_image_job(panel.kind, panel.original.get(), panel.processed.get(), panel.output.get(),
-                                    panel.threshold.get(), panel.data_range.get(), self.store.path.parent / "results", template)
+                                    panel.threshold.get(), panel.data_range.get(), self.store.path.parent / "results", template,
+                                    output_format=panel.output_format.get())
         except ValueError as exc:
             messagebox.showerror("无法计算", str(exc), parent=self.root)
             return
-        if self.start_entry(job.entry, job.output):
-            self.set_text(self.image_results, f"计算中…\n本次结果路径：{job.output}")
+        if self.start_entry(job.entry, job.output, job.xlsx_output):
+            self.set_text(self.image_results, f"计算中…\n本次结果路径：{job.xlsx_output or job.output}")
 
-    def start_entry(self, entry, image_output=None):
+    def start_entry(self, entry, image_output=None, image_xlsx=None):
         try:
             self.runner.start(entry)
         except ValueError as exc:
             messagebox.showerror("无法运行", str(exc), parent=self.root)
             return False
         self._image_output = image_output
+        self._image_xlsx = image_xlsx
         self.active_entry = entry
         self.set_text(self.log, "")
         self.run_status.set(f"运行中：{entry.name}")
@@ -404,16 +407,20 @@ class MetricBoxApp:
                 if event.kind == "finished" and event.returncode == 0:
                     try:
                         result = json.loads(self._image_output.read_text(encoding="utf-8"))
+                        if self._image_xlsx is not None and not self._image_xlsx.is_file():
+                            raise ValueError("Excel 文件未生成")
+                        paths = str(self._image_output) if self._image_xlsx is None else f"{self._image_xlsx}\n配套 JSON：{self._image_output}"
                         summary = "\n".join(f"{key}: {value}" for key, value in result.get("mean_per_image", {}).items())
-                        self.set_text(self.image_results, f"计算完成，共 {result['count']} 张图像\n结果文件：{self._image_output}\n\n"
+                        self.set_text(self.image_results, f"计算完成，共 {result['count']} 张图像\n结果文件：{paths}\n\n"
                                       f"逐图指标平均值\n{summary}\n\n详细结果\n{json.dumps(result, ensure_ascii=False, indent=2)}")
                         self.tabs.select(self.image_results.master.master)
-                        self.status_var.set(f"计算完成，结果已保存：{self._image_output}")
+                        self.status_var.set(f"计算完成，结果已保存：{self._image_xlsx or self._image_output}")
                     except (OSError, ValueError, KeyError) as exc:
                         self.set_text(self.image_results, f"脚本已结束，但读取结果失败：{exc}\n请查看运行日志。")
                 else:
                     self.set_text(self.image_results, f"{event.text}，未生成本次有效结果。请查看运行日志。")
                 self._image_output = None
+                self._image_xlsx = None
             self.active_entry = None
             self._terminal_event = None
             self.update_buttons()

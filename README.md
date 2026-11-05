@@ -1,7 +1,7 @@
 # MetricBox · 深度学习指标工具箱
 
 一个可以继续扩展的中文桌面脚本管理框架。使用 Python 标准库和 Tkinter，无需安装第三方界面依赖。
-内置指标计算使用可选的 NumPy、Pillow；脚本管理功能仍无需这些依赖。
+内置指标计算使用可选的 NumPy、Pillow，Excel 导出使用 openpyxl；脚本管理功能仍无需这些依赖。
 
 ## 启动
 
@@ -40,7 +40,7 @@ Windows 也可以双击 `start.bat`。如果希望使用指定环境启动工具
 1. 在“计算指标”中选择图像质量、二值分割或融合统计。
 2. 在“原始图像 / 参考图”填入绝对路径，或点击 **图片… / 目录…** 选择输入。
 3. 在“处理后图像”选择待评估图像或目录。原图作为 `target`，处理图作为 `pred`。
-4. 可选填结果 JSON 文件位置；留空会自动保存到脚本库旁的 `data/results/`（自定义数据目录则随之改变）。
+4. 在“输出格式”选择 `xlsx`（默认）或 `json`。可选填结果文件位置；留空会自动保存到脚本库旁的 `data/results/`（自定义数据目录则随之改变）。
 5. 点击 **开始计算**，完成后自动切换到 **计算结果** 页签，显示平均值、逐图详情和保存路径。
    **运行日志** 页签保留计算命令、错误信息和退出码；计算中可以停止。
 
@@ -51,7 +51,32 @@ Windows 也可以双击 `start.bat`。如果希望使用指定环境启动工具
 
 该入口只对所选真实路径执行计算，不使用 `--demo`，不会改动输入图像，也不改变脚本库中保存的参数。
 如果已登记同类内置脚本，则复用其 Python 解释器和工作目录；未登记时使用当前 Python 环境。
-结果文件名留空时每次生成唯一名称；手动指定时须是尚不存在的 `.json` 文件，避免覆盖历史结果。
+结果文件名留空时每次生成唯一名称；手动指定时须是尚不存在的 `.xlsx` 或 `.json` 文件，避免覆盖历史结果。
+文件扩展名决定最终格式，选择 Excel 时还会保存同名 JSON，供界面读取和复现；两个文件均不会覆盖已有文件。
+
+### Excel 输出
+
+更新后请在运行指标所使用的 Python 环境执行 `python -m pip install -r requirements-metrics.txt`，
+安装新增的 `openpyxl>=3.1` 依赖。仅导出 JSON 时不需要导入 openpyxl。
+
+- 图像质量、分割和融合：Excel 包含 **汇总**、**逐图明细** 两张工作表。
+- 分类：Excel 包含 **汇总**、**逐类指标**、**混淆矩阵**，矩阵行为真值、列为预测。
+- 汇总同时保留任务类型、演示标记、输入路径和计算参数；图像汇总仍是逐图等权平均。
+- 数字保留为数值类型，显示六位小数；底层保留原始计算精度。无穷大保留为文本 `Infinity`。
+- 明细支持筛选与冻结表头。文件名、类别标签始终按文本写入，不会被解释为 Excel 公式。
+- 工作簿为本次计算的静态结果，不会根据修改后的单元格重新计算图像指标。
+
+命令行直接导出 Excel：
+
+```powershell
+python builtin_scripts/quality.py --pred E:/results --target E:/ground_truth --output E:/reports/quality.xlsx
+```
+
+同时保留两种格式（也适用于其他三组内置脚本）：
+
+```powershell
+python builtin_scripts/quality.py --pred E:/results --target E:/ground_truth --output E:/reports/quality.json --xlsx E:/reports/quality.xlsx
+```
 界面在较小窗口中可使用右侧滚动条查看全部图像输入选项。
 
 ### 脚本库与命令行方式
@@ -120,7 +145,7 @@ python -m pip install -r requirements-metrics.txt
   SF 为横向、纵向有效相邻差分各自均方之和的平方根。它们描述融合图像统计特性，不能单独判断融合优劣。
 - 每张图的结果位于 `results`；`mean_per_image` 是各图指标的等权平均，
   **不是**所有像素合并后的全局指标。任一图 PSNR 为无穷时，其均值也为无穷。分割混淆计数逐图保留，不进行均值汇总。
-- `--output` 保存 UTF-8 JSON；缺省只输出到运行日志。结果路径不得覆盖输入文件。
+- `--output` 按扩展名保存 UTF-8 JSON 或 Excel，`--xlsx` 可额外导出 Excel；缺省只输出到运行日志。结果路径不得覆盖输入文件。
   真实输入与 `--demo` 不能同时指定，避免误将演示结果当作真实评估。
 
 定义参考：[SSIM 作者说明](https://www.ece.uwaterloo.ca/~z70wang/research/ssim/)、
@@ -211,7 +236,7 @@ python -m unittest discover -s tests -v
 
 测试使用临时目录，不修改真实脚本库。包括真实子进程运行、中文路径 / 参数、失败退出、停止运行，
 以及 Tkinter 的添加、编辑、筛选、持久化恢复和日志展示流程。界面测试需要可用的桌面会话。
-验证内置指标前需安装 `requirements-metrics.txt`；测试也覆盖已知数值、真实图像/标签输入、目录配对及 JSON 导出。
+验证内置指标前需安装 `requirements-metrics.txt`；测试也覆盖已知数值、真实图像/标签输入、目录配对及 JSON/Excel 导出。
 
 快捷键：`Ctrl+N` 添加脚本，`Ctrl+F` 聚焦搜索；编辑窗口内 `Ctrl+Enter` 保存，`Esc` 取消。
 

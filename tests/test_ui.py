@@ -56,6 +56,7 @@ class DesktopFlowTests(unittest.TestCase):
             panel.browse_image(panel.processed)
         panel.run_button.invoke()
         output = self.app._image_output
+        excel_output = self.app._image_xlsx
         self.assertIsNotNone(output)
         self.assertNotIn("--demo", self.app.active_entry.arguments)
         self.finish_image_job()
@@ -64,6 +65,12 @@ class DesktopFlowTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["metrics"]["MAE"], 4)
         self.assertEqual(result["results"][0]["metrics"]["MSE"], 16)
         self.assertIn("MAE: 4.0", self.app.image_results.get("1.0", "end"))
+        from openpyxl import load_workbook
+        from io import BytesIO
+        book = load_workbook(BytesIO(excel_output.read_bytes()))
+        self.assertEqual(book["逐图明细"]["C2"].value, 16)
+        book.close()
+        self.assertIn(str(excel_output), self.app.image_results.get("1.0", "end"))
         self.assertEqual(self.app.store.entries, [])
         self.assertFalse(self.app.store.path.exists())
 

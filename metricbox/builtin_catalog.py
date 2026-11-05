@@ -16,6 +16,6 @@ def builtin_entries():
          '单张或目录中的 8 位灰度融合图。参数：["--image", "融合结果路径"]。EN 使用 256 bins，SD 使用总体标准差，SF 使用相邻差分均方。'),
     ]
     return [ScriptEntry(name=name, path=str(APP_DIR / "builtin_scripts" / f"{key}.py"), category=category,
-                        tags=tags, description=description + '\n初始参数 --demo 仅演示。评估真实数据时须替换全部参数；可加 --output 保存 JSON。需要 NumPy、Pillow。',
+                        tags=tags, description=description + '\n初始参数 --demo 仅演示。评估真实数据时须替换全部参数；可加 --output 保存 JSON 或 XLSX。计算需要 NumPy、Pillow；Excel 需要 openpyxl。',
                         arguments=["--demo"], working_dir=str(APP_DIR))
             for key, name, category, tags, description in definitions]

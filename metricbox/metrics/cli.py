@@ -31,7 +31,8 @@ def image_files(path):
 def main(kind, argv=None):
     parser = argparse.ArgumentParser(description=f"MetricBox 内置指标：{kind}（默认不运行演示，须显式 --demo）")
     parser.add_argument("--demo", action="store_true", help="使用内存中的演示数据，不代表真实评估")
-    parser.add_argument("--output", type=Path, help="保存 JSON 结果")
+    parser.add_argument("--output", type=Path, help="保存 JSON 或 XLSX 结果（按扩展名选择）")
+    parser.add_argument("--xlsx", type=Path, help="额外保存 Excel .xlsx，可与 --output 的 JSON 同时使用")
     if kind == "fusion":
         parser.add_argument("--image", type=Path, help="8 位灰度融合图或目录")
     else:
@@ -104,10 +105,24 @@ def main(kind, argv=None):
             keys = [key for key in records[0]["metrics"] if key not in ("TP", "FP", "FN", "TN")]
             result["mean_per_image"] = {key: float(np.mean([row["metrics"][key] for row in records])) for key in keys}
         result["settings"] = {key: getattr(args, key) for key in ("data_range", "threshold") if hasattr(args, key)}
+        result["inputs"] = {key: str(getattr(args, key).resolve()) for key in ("pred", "target", "image")
+                            if getattr(args, key, None) is not None}
         text = json.dumps(json_safe(result), ensure_ascii=False, indent=2, allow_nan=False)
-        if args.output:
-            if args.output.resolve() in {path.resolve() for path in used_paths}:
+        destinations = [path for path in (args.output, args.xlsx) if path is not None]
+        if args.xlsx and args.xlsx.suffix.lower() != ".xlsx":
+            raise ValueError("--xlsx 文件须使用 .xlsx 扩展名")
+        if args.output and args.output.suffix.lower() not in (".json", ".xlsx"):
+            raise ValueError("--output 文件须使用 .json 或 .xlsx 扩展名")
+        if len({path.resolve() for path in destinations}) != len(destinations):
+            raise ValueError("JSON 与 Excel 输出路径不能重复")
+        for path in destinations:
+            if path.resolve() in {item.resolve() for item in used_paths}:
                 raise ValueError("结果文件不能覆盖输入文件")
+        for path in destinations:
+            if path.suffix.lower() == ".xlsx":
+                from .excel import write_xlsx
+                write_xlsx(json_safe(result), path)
+        if args.output and args.output.suffix.lower() == ".json":
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(text + "\n", encoding="utf-8")
         print(text, flush=True)
