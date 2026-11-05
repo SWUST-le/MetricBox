@@ -1,6 +1,7 @@
 """Desktop integration tests with real Tk widgets and isolated storage."""
 
 from pathlib import Path
+import json
 import tempfile
 import time
 import tkinter as tk
@@ -33,6 +34,114 @@ class DesktopFlowTests(unittest.TestCase):
 
     def dialog(self):
         return next(child for child in self.root.winfo_children() if isinstance(child, ScriptDialog))
+
+    def finish_image_job(self):
+        deadline = time.monotonic() + 20
+        while self.app.active_entry is not None and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.02)
+        self.assertIsNone(self.app.active_entry)
+        self.assertIn("退出码 0", self.app.run_status.get())
+        self.assertEqual(self.app.tabs.select(), str(self.app.image_results.master.master))
+
+    def test_image_form_choosers_drive_real_quality_calculation_and_auto_export(self):
+        import numpy as np
+        from PIL import Image
+        original, processed = self.base / "原图 空格.png", self.base / "处理后.png"
+        Image.fromarray(np.zeros((16, 16), dtype=np.uint8)).save(original)
+        Image.fromarray(np.full((16, 16), 4, dtype=np.uint8)).save(processed)
+        panel = self.app.image_panel
+        with patch("metricbox.ui.image_panel.filedialog.askopenfilename", side_effect=[str(original), str(processed)]):
+            panel.browse_image(panel.original)
+            panel.browse_image(panel.processed)
+        panel.run_button.invoke()
+        output = self.app._image_output
+        self.assertIsNotNone(output)
+        self.assertNotIn("--demo", self.app.active_entry.arguments)
+        self.finish_image_job()
+        result = json.loads(output.read_text(encoding="utf-8"))
+        self.assertFalse(result["demo"])
+        self.assertEqual(result["results"][0]["metrics"]["MAE"], 4)
+        self.assertEqual(result["results"][0]["metrics"]["MSE"], 16)
+        self.assertIn("MAE: 4.0", self.app.image_results.get("1.0", "end"))
+        self.assertEqual(self.app.store.entries, [])
+        self.assertFalse(self.app.store.path.exists())
+
+    def test_image_form_directories_and_selected_output(self):
+        import numpy as np
+        from PIL import Image
+        original, processed = self.base / "原图目录", self.base / "处理目录"
+        original.mkdir()
+        processed.mkdir()
+        for index in range(2):
+            Image.fromarray(np.zeros((16, 16), dtype=np.uint8)).save(original / f"{index}.png")
+            Image.fromarray(np.full((16, 16), index * 10, dtype=np.uint8)).save(processed / f"{index}.png")
+        panel = self.app.image_panel
+        with patch("metricbox.ui.image_panel.filedialog.askdirectory", side_effect=[str(original), str(processed)]):
+            panel.browse_directory(panel.original)
+            panel.browse_directory(panel.processed)
+        output = self.base / "导出" / "指标.json"
+        with patch("metricbox.ui.image_panel.filedialog.asksaveasfilename", return_value=str(output)):
+            panel.browse_output()
+        panel.run_button.invoke()
+        self.finish_image_job()
+        result = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["mean_per_image"]["MSE"], 50)
+
+    def test_image_form_validation_and_task_specific_controls(self):
+        panel = self.app.image_panel
+        with patch("metricbox.app.messagebox.showerror") as error:
+            panel.run_button.invoke()
+        error.assert_called_once()
+        self.assertIsNone(self.app.active_entry)
+        panel.task.set("融合图像统计（EN / SD / SF）")
+        self.assertEqual(str(panel.original_controls[1].cget("state")), "disabled")
+        self.assertEqual(str(panel.range_input.cget("state")), "disabled")
+        panel.task.set("二值分割（真值与预测掩膜）")
+        self.assertEqual(str(panel.threshold_input.cget("state")), "normal")
+        self.assertEqual(str(panel.original_controls[1].cget("state")), "normal")
+
+    def test_image_form_executes_segmentation_and_fusion_from_paths(self):
+        import numpy as np
+        from PIL import Image
+        mask = self.base / "掩膜.png"
+        Image.fromarray(np.array([[0, 1], [1, 0]], dtype=np.uint8)).save(mask)
+        panel = self.app.image_panel
+        panel.original.set(str(mask))
+        panel.processed.set(str(mask))
+        panel.task.set("二值分割（真值与预测掩膜）")
+        panel.threshold.set("0.5")
+        panel.run_button.invoke()
+        output = self.app._image_output
+        self.finish_image_job()
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["results"][0]["metrics"]["TP"], 2)
+        panel.task.set("融合图像统计（EN / SD / SF）")
+        panel.original.set("此路径不参与融合统计")
+        panel.run_button.invoke()
+        output = self.app._image_output
+        self.finish_image_job()
+        self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["results"][0]["metrics"]["EN"], 1)
+
+    def test_failed_image_job_does_not_display_a_successful_result(self):
+        import numpy as np
+        from PIL import Image
+        image = self.base / "too_small.png"
+        Image.fromarray(np.zeros((2, 2), dtype=np.uint8)).save(image)
+        panel = self.app.image_panel
+        panel.original.set(str(image))
+        panel.processed.set(str(image))
+        panel.run_button.invoke()
+        output = self.app._image_output
+        deadline = time.monotonic() + 15
+        while self.app.active_entry is not None and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.02)
+        self.assertIsNone(self.app.active_entry)
+        self.assertFalse(output.exists())
+        self.assertIn("未生成本次有效结果", self.app.image_results.get("1.0", "end"))
+        self.assertIn("11", self.app.log.get("1.0", "end"))
+        self.assertIn("退出码 2", self.app.run_status.get())
 
     def test_add_via_file_chooser_edit_search_run_and_remove(self):
         script = self.base / "已有 指标.py"

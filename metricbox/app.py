@@ -11,10 +11,12 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .builtin_catalog import builtin_entries
 from .config import REGISTRY_PATH
+from .image_jobs import prepare_image_job
 from .models import ScriptEntry
 from .runner import ScriptRunner
 from .storage import ScriptStore, StorageError
 from .ui.script_dialog import ScriptDialog
+from .ui.image_panel import ImageInputPanel
 from .ui import theme
 
 
@@ -30,6 +32,7 @@ class MetricBoxApp:
         self._closing = False
         self._terminal_event = None
         self._poll_id = None
+        self._image_output = None
         root.title("MetricBox · 深度学习指标工具箱")
         root.geometry("1240x850")
         root.minsize(1000, 720)
@@ -146,6 +149,8 @@ class MetricBoxApp:
 
         self.tabs = ttk.Notebook(bottom)
         self.tabs.grid(row=1, column=0, sticky="nsew")
+        self.image_panel = ImageInputPanel(self.tabs, self.run_image_metrics)
+        self.tabs.add(self.image_panel, text="图像输入与计算")
         detail_frame = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.tabs.add(detail_frame, text="脚本信息")
         self.details = self._text_area(detail_frame, "white", theme.TEXT)
@@ -159,6 +164,10 @@ class MetricBoxApp:
         self.stop_button.pack(side="right")
         ttk.Button(log_tools, text="保存日志", command=self.save_log).pack(side="right", padx=6)
         self.log = self._text_area(log_frame, "#182338", "#DDE6F7", font=("Consolas", 10))
+        result_frame = ttk.Frame(self.tabs, style="Panel.TFrame")
+        self.tabs.add(result_frame, text="计算结果")
+        self.image_results = self._text_area(result_frame, "white", theme.TEXT)
+        self.set_text(self.image_results, "选择原始图像和处理后图像，点击“开始计算”。结果将自动保存为 JSON 文件。")
         self.status_var = tk.StringVar(value=f"就绪  ·  脚本库：{self.store.path}")
         ttk.Label(main, textvariable=self.status_var, style="Muted.TLabel", wraplength=900).grid(
             row=5, column=0, sticky="w", pady=(14, 0))
@@ -271,6 +280,7 @@ class MetricBoxApp:
             button.configure(state="normal" if selected and not self._read_only else "disabled")
         self.run_button.configure(state="normal" if selected and not busy else "disabled")
         self.stop_button.configure(state="normal" if busy else "disabled")
+        self.image_panel.run_button.configure(state="disabled" if busy else "normal")
 
     def add_script(self):
         if not self._read_only:
@@ -323,17 +333,37 @@ class MetricBoxApp:
         entry = self.selected_entry()
         if not entry or self.active_entry is not None:
             return
+        self.start_entry(entry)
+
+    def run_image_metrics(self):
+        if self.active_entry is not None or self.runner.running:
+            return
+        panel = self.image_panel
+        default = next(item for item in builtin_entries() if Path(item.path).stem == panel.kind)
+        template = next((item for item in self.store.entries if Path(item.path).resolve() == Path(default.path).resolve()), default)
+        try:
+            job = prepare_image_job(panel.kind, panel.original.get(), panel.processed.get(), panel.output.get(),
+                                    panel.threshold.get(), panel.data_range.get(), self.store.path.parent / "results", template)
+        except ValueError as exc:
+            messagebox.showerror("无法计算", str(exc), parent=self.root)
+            return
+        if self.start_entry(job.entry, job.output):
+            self.set_text(self.image_results, f"计算中…\n本次结果路径：{job.output}")
+
+    def start_entry(self, entry, image_output=None):
         try:
             self.runner.start(entry)
         except ValueError as exc:
             messagebox.showerror("无法运行", str(exc), parent=self.root)
-            return
+            return False
+        self._image_output = image_output
         self.active_entry = entry
         self.set_text(self.log, "")
         self.run_status.set(f"运行中：{entry.name}")
-        self.tabs.select(1)
+        self.tabs.select(self.log.master.master)
         self.status_var.set(f"正在运行：{entry.name}")
         self.update_buttons()
+        return True
 
     def stop_script(self):
         if self.active_entry is not None:
@@ -370,6 +400,20 @@ class MetricBoxApp:
             name = self.active_entry.name if self.active_entry else "脚本"
             self.run_status.set(f"{name} · {event.text} · 退出码 {event.returncode}")
             self.status_var.set(self.run_status.get())
+            if self._image_output is not None:
+                if event.kind == "finished" and event.returncode == 0:
+                    try:
+                        result = json.loads(self._image_output.read_text(encoding="utf-8"))
+                        summary = "\n".join(f"{key}: {value}" for key, value in result.get("mean_per_image", {}).items())
+                        self.set_text(self.image_results, f"计算完成，共 {result['count']} 张图像\n结果文件：{self._image_output}\n\n"
+                                      f"逐图指标平均值\n{summary}\n\n详细结果\n{json.dumps(result, ensure_ascii=False, indent=2)}")
+                        self.tabs.select(self.image_results.master.master)
+                        self.status_var.set(f"计算完成，结果已保存：{self._image_output}")
+                    except (OSError, ValueError, KeyError) as exc:
+                        self.set_text(self.image_results, f"脚本已结束，但读取结果失败：{exc}\n请查看运行日志。")
+                else:
+                    self.set_text(self.image_results, f"{event.text}，未生成本次有效结果。请查看运行日志。")
+                self._image_output = None
             self.active_entry = None
             self._terminal_event = None
             self.update_buttons()
