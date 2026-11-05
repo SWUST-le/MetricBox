@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__
+from .builtin_catalog import builtin_entries
 from .config import REGISTRY_PATH
 from .models import ScriptEntry
 from .runner import ScriptRunner
@@ -101,6 +102,8 @@ class MetricBoxApp:
         self.search_input.pack(side="left", fill="x", expand=True)
         self.search_var.trace_add("write", lambda *args: self.refresh_table())
         ttk.Button(search, text="刷新", command=self.refresh).pack(side="left", padx=(10, 0))
+        self.builtin_button = ttk.Button(search, text="添加常用指标", command=self.add_builtins)
+        self.builtin_button.pack(side="left", padx=(10, 0))
         self.filter_var = tk.StringVar(value="全部脚本 · 搜索名称、说明、标签或路径")
         ttk.Label(main, textvariable=self.filter_var, style="Muted.TLabel").grid(
             row=3, column=0, sticky="w", pady=(8, 12))
@@ -263,6 +266,7 @@ class MetricBoxApp:
         selected = self.selected_entry() is not None
         busy = self.runner.running or self.active_entry is not None
         self.add_button.configure(state="disabled" if self._read_only else "normal")
+        self.builtin_button.configure(state="disabled" if self._read_only else "normal")
         for button in (self.edit_button, self.remove_button):
             button.configure(state="normal" if selected and not self._read_only else "disabled")
         self.run_button.configure(state="normal" if selected and not busy else "disabled")
@@ -271,6 +275,19 @@ class MetricBoxApp:
     def add_script(self):
         if not self._read_only:
             ScriptDialog(self.root, self.save_entry, categories=[entry.category for entry in self.store.entries])
+
+    def add_builtins(self):
+        if self._read_only:
+            return
+        try:
+            count = self.store.add_missing(builtin_entries())
+        except (StorageError, ValueError) as exc:
+            messagebox.showerror("添加失败", str(exc), parent=self.root)
+            return
+        self.category = "全部脚本"
+        self.search_var.set("")
+        self.refresh()
+        self.status_var.set(f"已添加 {count} 组常用指标（已有配置保持不变）。默认 --demo 为演示，真实评估请先编辑输入参数。")
 
     def edit_script(self):
         entry = self.selected_entry()

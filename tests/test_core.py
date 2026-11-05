@@ -68,6 +68,14 @@ class StoreTests(unittest.TestCase):
         self.script.unlink()
         self.assertFalse(ScriptStore(self.store.path).load()[0].available)
 
+    def test_catalog_import_is_atomic_when_a_script_is_missing(self):
+        valid = ScriptEntry(name="有效", path=str(self.script))
+        missing = ScriptEntry(name="缺失", path=str(self.base / "missing.py"))
+        with self.assertRaisesRegex(ValueError, "缺失"):
+            self.store.add_missing([valid, missing])
+        self.assertEqual(self.store.entries, [])
+        self.assertFalse(self.store.path.exists())
+
 
 class RunnerTests(unittest.TestCase):
     def setUp(self):

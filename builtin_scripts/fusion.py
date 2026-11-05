@@ -1,0 +1,8 @@
+"""Grayscale fusion image statistics entry point."""
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from metricbox.metrics.cli import main
+
+if __name__ == "__main__":
+    main("fusion")

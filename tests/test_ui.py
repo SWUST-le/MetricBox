@@ -92,6 +92,26 @@ class DesktopFlowTests(unittest.TestCase):
         self.assertFalse(self.app.store.path.exists())
         dialog.destroy()
 
+    def test_import_builtins_preserves_edits_and_runs_demo(self):
+        self.app.builtin_button.invoke()
+        self.root.update()
+        self.assertEqual(len(self.app.store.entries), 4)
+        entry = next(item for item in self.app.store.entries if "PSNR" in item.tags)
+        entry.description = "用户的配置说明"
+        self.app.save_entry(entry)
+        self.app.builtin_button.invoke()
+        self.assertEqual(len(self.app.store.entries), 4)
+        self.assertEqual(self.app.selected_entry().description, "用户的配置说明")
+        self.assertEqual(len(ScriptStore(self.app.store.path).load()), 4)
+        self.app.run_button.invoke()
+        deadline = time.monotonic() + 15
+        while self.app.active_entry is not None and time.monotonic() < deadline:
+            self.root.update()
+            time.sleep(0.02)
+        self.assertIsNone(self.app.active_entry)
+        self.assertIn('"SSIM"', self.app.log.get("1.0", "end"))
+        self.assertIn("退出码 0", self.app.run_status.get())
+
     def test_reload_and_missing_file_status(self):
         script = self.base / "metric.py"
         script.write_text("print('ok')", encoding="utf-8")
@@ -123,6 +143,7 @@ class DesktopFlowTests(unittest.TestCase):
             error.assert_called_once()
             self.assertTrue(app._read_only)
             self.assertEqual(str(app.add_button.cget("state")), "disabled")
+            self.assertEqual(str(app.builtin_button.cget("state")), "disabled")
             app.add_script()
             self.assertFalse(any(isinstance(child, ScriptDialog) for child in window.winfo_children()))
             self.assertEqual(broken.read_text(encoding="utf-8"), "{broken")

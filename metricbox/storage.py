@@ -70,3 +70,19 @@ class ScriptStore:
     def remove(self, entry_id: str) -> None:
         self._commit([item for item in self.entries if item.id != entry_id])
 
+    def add_missing(self, entries: list[ScriptEntry]) -> int:
+        """Atomically import a catalog without changing existing user configuration."""
+        paths = {Path(item.path).resolve() for item in self.entries}
+        additions = []
+        for entry in entries:
+            path = Path(entry.path).resolve()
+            if path in paths:
+                continue
+            if not path.is_file():
+                raise ValueError(f"内置脚本缺失：{path}")
+            additions.append(entry)
+            paths.add(path)
+        if additions:
+            self._commit([*self.entries, *additions])
+        return len(additions)
+

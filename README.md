@@ -1,6 +1,7 @@
 # MetricBox · 深度学习指标工具箱
 
 一个可以继续扩展的中文桌面脚本管理框架。使用 Python 标准库和 Tkinter，无需安装第三方界面依赖。
+内置指标计算使用可选的 NumPy、Pillow；脚本管理功能仍无需这些依赖。
 
 ## 启动
 
@@ -28,6 +29,79 @@ Windows 也可以双击 `start.bat`。如果希望使用指定环境启动工具
 - 为每个脚本单独指定 Python 解释器、工作目录和命令行参数。
 - Python 脚本在独立进程中运行；异步显示标准输出、错误输出与退出码，可停止、保存日志。
 - 移除记录时保留原始脚本文件。
+- 点击“添加常用指标”导入四组内置计算脚本，重复添加不会覆盖已有配置。
+
+## 常用指标
+
+启动后点击搜索框旁的 **添加常用指标**，即可导入下表中的四组脚本。
+选中后点击 **运行脚本** 可先体验演示；**初始参数 `["--demo"]` 仅使用演示数据，不是你的数据评估结果**。
+评估真实数据时，点击 **编辑**，将参数数组完整替换为对应示例。
+已有脚本、解释器和自定义参数不会被覆盖；从列表移除后可以再次添加。
+
+| 分类 | 指标 | 输入 |
+| --- | --- | --- |
+| 图像质量 | MAE、MSE、RMSE、PSNR、SSIM | 预测图与参考图，或配对目录 |
+| 二值分割 | 前景 IoU、Dice、Precision、Recall、F1、Specificity、Accuracy；TP/FP/FN/TN | 预测与真值灰度掩膜，或配对目录 |
+| 单标签分类 | Accuracy、逐类 Precision/Recall/F1、macro/micro/weighted、混淆矩阵 | 两份 JSON 标签列表 |
+| 融合图像统计 | EN（信息熵）、SD（标准差）、SF（空间频率） | 8 位灰度融合图，或图像目录 |
+
+在运行脚本所选的 Python 环境中安装可选依赖（当前开发环境已具备）：
+
+```powershell
+python -m pip install -r requirements-metrics.txt
+```
+
+图像质量参数（文件或目录均可）：
+
+```json
+["--pred", "E:/results", "--target", "E:/ground_truth", "--output", "E:/reports/quality.json"]
+```
+
+二值分割参数，0/255 掩膜默认阈值为 127；**0/1 掩膜必须改用 0.5**：
+
+```json
+["--pred", "E:/pred_masks", "--target", "E:/true_masks", "--threshold", "0.5", "--output", "E:/reports/segmentation.json"]
+```
+
+分类参数，两份文件内容分别为 JSON 列表，例如 `[0, 1, 2, 1]`，也支持全字符串标签：
+
+```json
+["--pred", "E:/pred.json", "--target", "E:/target.json", "--output", "E:/reports/classification.json"]
+```
+
+融合图像参数（只需融合结果图，无需源图）：
+
+```json
+["--image", "E:/fused_images", "--output", "E:/reports/fusion.json"]
+```
+
+也可以直接运行，如 `python builtin_scripts/quality.py --demo`。
+计算函数位于 `metricbox/metrics/core.py`，公共命令行入口位于 `metricbox/metrics/cli.py`，
+目录与说明位于 `metricbox/builtin_catalog.py`；新增计算脚本后在目录中增加一条定义即可接入界面。
+
+### 输入与计算约定
+
+- 图像支持 PNG/JPEG/BMP/TIFF；仅接受 8 位 `L` 或 `RGB` 模式，不隐式转换调色板、RGBA 或高位深图像。
+  分割和融合要求 `L` 灰度输入。不会调整图像尺寸、做配准、归一化或裁剪。
+- 单文件可使用不同文件名；目录递归扫描，按相同的**相对路径和完整文件名（含扩展名）**严格配对。
+  缺失、错配、空目录、尺寸或通道不一致均会报错，不会静默跳过。
+- 质量指标默认动态范围为 255，可使用 `--data-range` 显式指定。SSIM 使用 11×11 高斯窗口、
+  sigma=1.5、K1=0.01、K2=0.03、总体协方差，仅对有效窗口求均值，不自动降采样；RGB 分通道计算后平均。
+  图像高宽至少为 11。相同图像的 PSNR 为正无穷，在标准 JSON 中表示为字符串 `"Infinity"`。
+- 分割的预测和真值均按 `像素值 > threshold` 判为前景。没有前景的两张掩膜，IoU 和 Dice 设为 1；
+  Precision、Recall、F1、Specificity 的分母为零时设为 0。当前不支持多类 mIoU 或 ignore label。
+- 分类只接受同类型的整数或字符串类别标签，不接受概率列表；混淆矩阵行为真值、列为预测。
+  类别取预测与真值的并集，零分母置零。macro 为逐类算术平均，weighted 按真值样本数加权，
+  单标签 micro 指标与 Accuracy 相同。不是目标检测 mAP/AP 评估器。
+- EN 为 256-bin 灰度直方图的 Shannon 熵（log2）；SD 为总体标准差（ddof=0）；
+  SF 为横向、纵向有效相邻差分各自均方之和的平方根。它们描述融合图像统计特性，不能单独判断融合优劣。
+- 每张图的结果位于 `results`；`mean_per_image` 是各图指标的等权平均，
+  **不是**所有像素合并后的全局指标。任一图 PSNR 为无穷时，其均值也为无穷。分割混淆计数逐图保留，不进行均值汇总。
+- `--output` 保存 UTF-8 JSON；缺省只输出到运行日志。结果路径不得覆盖输入文件。
+  真实输入与 `--demo` 不能同时指定，避免误将演示结果当作真实评估。
+
+定义参考：[SSIM 作者说明](https://www.ece.uwaterloo.ca/~z70wang/research/ssim/)、
+[分类 F1 与平均方式](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.f1_score.html)。
 
 ## 第一次使用
 
@@ -114,6 +188,7 @@ python -m unittest discover -s tests -v
 
 测试使用临时目录，不修改真实脚本库。包括真实子进程运行、中文路径 / 参数、失败退出、停止运行，
 以及 Tkinter 的添加、编辑、筛选、持久化恢复和日志展示流程。界面测试需要可用的桌面会话。
+验证内置指标前需安装 `requirements-metrics.txt`；测试也覆盖已知数值、真实图像/标签输入、目录配对及 JSON 导出。
 
 快捷键：`Ctrl+N` 添加脚本，`Ctrl+F` 聚焦搜索；编辑窗口内 `Ctrl+Enter` 保存，`Esc` 取消。
 
